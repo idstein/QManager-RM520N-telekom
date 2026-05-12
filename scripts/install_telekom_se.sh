@@ -342,6 +342,29 @@ EOF
         sms_patched=$((sms_patched + 1))
     done
     [ "$sms_patched" -gt 0 ] && info "sms_tool callers retargeted: /dev/smd11 -> /dev/at_mdm0 ($sms_patched files)"
+
+    # Tailscale CGI: detect-by-path -> detect-by-systemctl.
+    # Upstream is_installed() hardcodes [ -f /lib/systemd/system/tailscaled.service ]
+    # which never matches on this layout (our unit is at /etc/systemd/system/
+    # because /lib is on RO squashfs). Replace with a path-agnostic check that
+    # asks systemd itself, plus dynamic UNIT_DIR/WANTS_DIR resolution.
+    ts_cgi="$CGI_DIR/vpn/tailscale.sh"
+    if [ -f "$ts_cgi" ]; then
+        # Replace the hardcoded WANTS_DIR + UNIT_DIR block with a dynamic one
+        if grep -q '^WANTS_DIR="/lib/systemd/system/multi-user.target.wants"$' "$ts_cgi"; then
+            sed -i \
+                -e '/^WANTS_DIR="\/lib\/systemd\/system\/multi-user.target.wants"$/c\
+_TS_FRAG=$(systemctl show -p FragmentPath --value tailscaled 2>/dev/null)\
+UNIT_DIR=${_TS_FRAG:+$(dirname "$_TS_FRAG")}\
+UNIT_DIR=${UNIT_DIR:-/lib/systemd/system}\
+WANTS_DIR="$UNIT_DIR/multi-user.target.wants"' \
+                -e '/^UNIT_DIR="\/lib\/systemd\/system"$/d' \
+                "$ts_cgi"
+        fi
+        # Replace is_installed body to use systemctl, not a hardcoded /lib path
+        sed -i 's|\[ -f /lib/systemd/system/tailscaled.service \] && \[ -d "$TAILSCALE_DIR" \]|[ -d "$TAILSCALE_DIR" ] \&\& [ -x "$TAILSCALED_BIN" ] \&\& systemctl cat tailscaled --no-pager >/dev/null 2>\&1|' "$ts_cgi"
+        info "vpn/tailscale.sh: is_installed retargeted to systemctl-cat detection"
+    fi
 }
 
 # =============================================================================
