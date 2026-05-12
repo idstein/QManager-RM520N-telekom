@@ -61,6 +61,7 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_FRONTEND="$SRC_DIR/out"
 SRC_SCRIPTS="$SRC_DIR/scripts"
 SRC_DEPS="$SRC_DIR/dependencies"
+SRC_TELEKOM_OVERRIDES="$SRC_DIR/telekom-cgi-overrides"
 
 # --- Destination paths (writable on ubi2_0, slot-independent) ----------------
 
@@ -240,6 +241,24 @@ install_backend() {
         find "$CGI_DIR" -name "*.sh" -type f -exec chmod 755 {} \;
         find "$CGI_DIR" -name "*.json" -exec chmod 644 {} \;
         info "$(find "$CGI_DIR" -name "*.sh" | wc -l | tr -d ' ') CGI scripts -> $CGI_DIR"
+    fi
+
+    # Telekom CGI overrides — overlay stubs for opkg-dependent features
+    # (email alerts msmtp install, etc.) that can't work without Entware.
+    # Each file under telekom-cgi-overrides/cgi-bin/quecmanager/... replaces
+    # the same-named file at $WWW_ROOT/cgi-bin/quecmanager/... .
+    if [ -d "$SRC_TELEKOM_OVERRIDES/cgi-bin/quecmanager" ]; then
+        local override_count=0
+        # find each override and copy it on top of the installed CGI
+        for src in $(find "$SRC_TELEKOM_OVERRIDES/cgi-bin/quecmanager" -name "*.sh" -type f); do
+            rel=${src#"$SRC_TELEKOM_OVERRIDES/cgi-bin/quecmanager/"}
+            dst="$CGI_DIR/$rel"
+            mkdir -p "$(dirname "$dst")"
+            install -m 755 "$src" "$dst"
+            override_count=$((override_count + 1))
+            info "  stub: $rel"
+        done
+        info "$override_count CGI overrides installed (opkg-dependent features disabled)"
     fi
 
     # PATH augmentation for interactive shells and child processes

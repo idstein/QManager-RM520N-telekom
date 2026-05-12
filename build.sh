@@ -41,9 +41,22 @@ fail() { printf "${RED}[%s] ERROR:${NC} %s\n" "$(date +%H:%M:%S)" "$1"; exit 1; 
 [ -d "$DEPS_DIR" ] || fail "'dependencies/' not found at repo root"
 [ -f "$DEPS_DIR/atcli_smd11" ] || fail "Missing required binary: dependencies/atcli_smd11"
 [ -f "$DEPS_DIR/sms_tool" ]    || fail "Missing required binary: dependencies/sms_tool"
-[ -f "$DEPS_DIR/jq.ipk" ]      || fail "Missing required package: dependencies/jq.ipk"
+
+# jq: at least one of the Entware IPK or the static armv7l binary must exist.
+# Upstream install_rm520n.sh uses jq.ipk; install_telekom_se.sh uses
+# jq-static-armv7l (the IPK's jq is dynamically linked against Entware's loader
+# and won't run without Entware).
+HAVE_JQ_IPK=0; HAVE_JQ_STATIC=0
+[ -f "$DEPS_DIR/jq.ipk" ]              && HAVE_JQ_IPK=1
+[ -f "$DEPS_DIR/jq-static-armv7l" ]    && HAVE_JQ_STATIC=1
+if [ "$HAVE_JQ_IPK" -eq 0 ] && [ "$HAVE_JQ_STATIC" -eq 0 ]; then
+    fail "Missing jq: provide either dependencies/jq.ipk (Entware install) or dependencies/jq-static-armv7l (Telekom install) or both"
+fi
+
 DROPBEAR_IPK=$(ls "$DEPS_DIR"/dropbear_*.ipk 2>/dev/null | head -n1)
-[ -n "$DROPBEAR_IPK" ] || fail "Missing required package: dependencies/dropbear_*.ipk"
+if [ -z "$DROPBEAR_IPK" ]; then
+    printf "  warn: no dropbear ipk in dependencies/ (only matters for install_rm520n.sh)\n"
+fi
 
 step "Preparing staging directory..."
 mkdir -p "$BUILD_DIR"
@@ -57,13 +70,27 @@ step "Copying backend scripts..."
 mkdir -p "$STAGING_DIR/scripts"
 for item in "$SCRIPTS_DIR"/*; do
   name="$(basename "$item")"
-  case "$name" in install_rm520n.sh|uninstall_rm520n.sh) continue ;; esac
+  # Installer scripts and the telekom CGI overrides directory are copied
+  # individually below so they end up in the right place in the tarball root.
+  case "$name" in
+    install_rm520n.sh|uninstall_rm520n.sh|install_telekom_se.sh) continue ;;
+    telekom-cgi-overrides) continue ;;
+  esac
   cp -r "$item" "$STAGING_DIR/scripts/$name"
 done
 
 step "Copying install & uninstall scripts..."
 cp "$SCRIPTS_DIR/install_rm520n.sh"   "$STAGING_DIR/install_rm520n.sh"
 cp "$SCRIPTS_DIR/uninstall_rm520n.sh" "$STAGING_DIR/uninstall_rm520n.sh"
+if [ -f "$SCRIPTS_DIR/install_telekom_se.sh" ]; then
+    cp "$SCRIPTS_DIR/install_telekom_se.sh" "$STAGING_DIR/install_telekom_se.sh"
+    chmod +x "$STAGING_DIR/install_telekom_se.sh"
+    step "Staged install_telekom_se.sh (Telekom 5G Empfaenger variant)"
+fi
+if [ -d "$SCRIPTS_DIR/telekom-cgi-overrides" ]; then
+    cp -r "$SCRIPTS_DIR/telekom-cgi-overrides" "$STAGING_DIR/telekom-cgi-overrides"
+    step "Staged telekom-cgi-overrides (opkg-feature stubs for Telekom variant)"
+fi
 
 step "Stamping version from package.json..."
 PKG_VERSION=$(sed -n 's/.*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$ROOT_DIR/package.json" | head -n1)
@@ -99,13 +126,40 @@ step "Copying bundled dependencies..."
 mkdir -p "$STAGING_DIR/dependencies"
 cp "$DEPS_DIR/atcli_smd11" "$STAGING_DIR/dependencies/atcli_smd11"
 cp "$DEPS_DIR/sms_tool"    "$STAGING_DIR/dependencies/sms_tool"
-cp "$DEPS_DIR/jq.ipk"      "$STAGING_DIR/dependencies/jq.ipk"
-cp "$DEPS_DIR"/dropbear_*.ipk "$STAGING_DIR/dependencies/"
 chmod 755 "$STAGING_DIR/dependencies/atcli_smd11" "$STAGING_DIR/dependencies/sms_tool"
 
-# Discord bot binary — built fresh on every package run via build-discord-bot.sh.
+# jq: bundle whichever variants exist. install_rm520n.sh prefers jq.ipk;
+# install_telekom_se.sh prefers jq-static-armv7l.
+if [ "$HAVE_JQ_IPK" -eq 1 ]; then
+    cp "$DEPS_DIR/jq.ipk" "$STAGING_DIR/dependencies/jq.ipk"
+    step "Bundled jq.ipk (Entware variant)"
+fi
+if [ "$HAVE_JQ_STATIC" -eq 1 ]; then
+    cp "$DEPS_DIR/jq-static-armv7l" "$STAGING_DIR/dependencies/jq-static-armv7l"
+    chmod 755 "$STAGING_DIR/dependencies/jq-static-armv7l"
+    step "Bundled jq-static-armv7l (Telekom variant)"
+fi
+
+# dropbear ipk — only needed for install_rm520n.sh (Telekom variant uses
+# Tailscale SSH and does not install dropbear).
+if [ -n "$DROPBEAR_IPK" ]; then
+    cp "$DEPS_DIR"/dropbear_*.ipk "$STAGING_DIR/dependencies/"
+fi
+
+# Discord bot binary — optional. Built fresh on every package run via
+# build-discord-bot.sh. Skip with QMANAGER_SKIP_DISCORD=1 (used by the
+# Telekom variant build, where the Discord bot feature is disabled).
+if [ -n "${QMANAGER_SKIP_DISCORD:-}" ]; then
+    step "QMANAGER_SKIP_DISCORD set — skipping Discord bot build"
+    SKIP_DISCORD=1
+else
+    SKIP_DISCORD=0
+fi
+
 DISCORD_BUILT="$ROOT_DIR/qmanager-build/bin/qmanager_discord"
-[ -f "$ROOT_DIR/build-discord-bot.sh" ] || fail "build-discord-bot.sh missing — required to build qmanager_discord"
+if [ "$SKIP_DISCORD" -eq 0 ]; then
+    [ -f "$ROOT_DIR/build-discord-bot.sh" ] || fail "build-discord-bot.sh missing — required to build qmanager_discord (skip with QMANAGER_SKIP_DISCORD=1)"
+fi
 
 # Locate Go's absolute executable path. bun on Windows can spawn a bash with
 # inconsistent PATH and command-lookup behavior, so don't rely on `command -v`.
@@ -160,17 +214,19 @@ locate_go_exe() {
     fi
     return 1
 }
-GO_EXE=$(locate_go_exe) \
-    || fail "Go not found — install from https://go.dev/dl/ (verify with: where.exe go in PowerShell)"
+if [ "$SKIP_DISCORD" -eq 0 ]; then
+    GO_EXE=$(locate_go_exe) \
+        || fail "Go not found — install from https://go.dev/dl/ (verify with: where.exe go in PowerShell). Skip with QMANAGER_SKIP_DISCORD=1"
 
-step "Building Discord bot (using $GO_EXE)..."
-( cd "$ROOT_DIR" && GO_EXE="$GO_EXE" ./build-discord-bot.sh ) \
-    || fail "build-discord-bot.sh failed"
+    step "Building Discord bot (using $GO_EXE)..."
+    ( cd "$ROOT_DIR" && GO_EXE="$GO_EXE" ./build-discord-bot.sh ) \
+        || fail "build-discord-bot.sh failed"
 
-[ -f "$DISCORD_BUILT" ] || fail "Build reported success but $DISCORD_BUILT not found"
-cp "$DISCORD_BUILT" "$STAGING_DIR/dependencies/qmanager_discord"
-chmod 755 "$STAGING_DIR/dependencies/qmanager_discord"
-step "Staged Discord bot binary"
+    [ -f "$DISCORD_BUILT" ] || fail "Build reported success but $DISCORD_BUILT not found"
+    cp "$DISCORD_BUILT" "$STAGING_DIR/dependencies/qmanager_discord"
+    chmod 755 "$STAGING_DIR/dependencies/qmanager_discord"
+    step "Staged Discord bot binary"
+fi
 
 step "Creating qmanager.tar.gz..."
 tar czf "$ARCHIVE" -C "$BUILD_DIR" qmanager_install
