@@ -300,6 +300,28 @@ $(grep -lrE '/usr/lib/qmanager|/usr/bin/qmanager_|/opt/bin/' "$d" 2>/dev/null)
 EOF
     done
     info "$rewrite_count files path-rewritten"
+
+    # Telekom firmware-specific: rewrite the AT channel from /dev/smd11 to
+    # /dev/at_mdm0. The vendor processes (ltecommander PID, MCM_atcop_svc) hold
+    # /dev/smd11 with ~12% per-call contention failure rate. /dev/at_mdm0 is
+    # the modem's AT-modem channel, owned only by port_bridge which forwards
+    # to /dev/at_usb0 — no contention for AT submission. Verified 15/15 calls
+    # in 0s vs /dev/smd11's 7/8.
+    #
+    # Also add -p "$AT_DEVICE" to qcmd's atcli invocation so it actually uses
+    # the configured device (upstream's qcmd has AT_DEVICE for sanity-check
+    # only, doesn't pass it to atcli).
+    if [ -f "$BIN_DIR/qcmd" ]; then
+        sed -i \
+            -e 's|^AT_DEVICE="/dev/smd11"|AT_DEVICE="/dev/at_mdm0"|' \
+            -e 's|"\$AT_CLI" "\$COMMAND" 2>/dev/null|"\$AT_CLI" -p "\$AT_DEVICE" "\$COMMAND" 2>/dev/null|' \
+            "$BIN_DIR/qcmd"
+        if grep -q 'AT_DEVICE="/dev/at_mdm0"' "$BIN_DIR/qcmd"; then
+            info "qcmd retargeted: /dev/smd11 -> /dev/at_mdm0 (Telekom variant)"
+        else
+            warn "qcmd retarget sed may have missed — verify manually"
+        fi
+    fi
 }
 
 # =============================================================================
