@@ -262,6 +262,7 @@ install_backend() {
     fi
 
     # PATH augmentation for interactive shells and child processes
+    mkdir -p /etc/profile.d
     cat > /etc/profile.d/qmanager.sh <<'PROFILE'
 # Added by install_telekom_se.sh
 # /usrdata/qmanager/bin is where QManager's bundled binaries live (jq,
@@ -274,6 +275,31 @@ esac
 PROFILE
     chmod 644 /etc/profile.d/qmanager.sh
     info "PATH augmentation -> /etc/profile.d/qmanager.sh"
+
+    # Path rewrites in installed CGIs / libs / daemons.
+    # The upstream codebase hardcodes /usr/lib/qmanager, /usr/bin/qmanager_,
+    # and /opt/bin/* (Entware layout). On the Telekom variant those paths
+    # don't exist (RO rootfs, no Entware). We retarget them to our writable
+    # /usrdata/qmanager/{lib,bin}/ layout. Same sed used on systemd units.
+    local rewrite_count=0
+    for d in "$CGI_DIR" "$LIB_DIR" "$BIN_DIR"; do
+        [ -d "$d" ] || continue
+        # Pick text files that reference any of the three patterns.
+        # We don't filter by extension because CGI helpers in usr/bin/ have
+        # no .sh suffix.
+        while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            sed -i \
+                -e 's|/usr/lib/qmanager/|/usrdata/qmanager/lib/|g' \
+                -e 's|/usr/bin/qmanager_|/usrdata/qmanager/bin/qmanager_|g' \
+                -e 's|/opt/bin/|/usrdata/qmanager/bin/|g' \
+                "$f"
+            rewrite_count=$((rewrite_count + 1))
+        done <<EOF
+$(grep -lrE '/usr/lib/qmanager|/usr/bin/qmanager_|/opt/bin/' "$d" 2>/dev/null)
+EOF
+    done
+    info "$rewrite_count files path-rewritten"
 }
 
 # =============================================================================
@@ -320,6 +346,9 @@ After=network.target
 
 [Service]
 Type=simple
+# PATH must include /usrdata/qmanager/bin so CGIs can find `jq`, `atcli_smd11`,
+# `sms_tool`, and the qmanager_* daemons without absolute references.
+Environment=PATH=/usrdata/qmanager/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Run as root so CGI scripts have full system access without sudo.
 # Access surface is restricted by the modem's iptables (LAN-only) and
 # by Tailscale (which is the recommended access path).
