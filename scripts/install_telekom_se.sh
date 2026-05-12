@@ -322,6 +322,22 @@ EOF
             warn "qcmd retarget sed may have missed — verify manually"
         fi
     fi
+
+    # Same /dev/smd11 -> /dev/at_mdm0 retarget for sms_tool callers. sms_tool
+    # opens the AT device directly (not via qcmd / atcli_smd11) so it bypasses
+    # the qcmd retarget above. If left on /dev/smd11 it hangs forever on
+    # vendor contention and holds /tmp/qmanager_at.lock, which breaks every
+    # other AT-using CGI ("modem_busy" errors).
+    sms_patched=0
+    for f in "$LIB_DIR/sms_alerts.sh" "$CGI_DIR/cellular/sms.sh"; do
+        [ -f "$f" ] || continue
+        sed -i \
+            -e 's|_SA_AT_DEVICE="/dev/smd11"|_SA_AT_DEVICE="/dev/at_mdm0"|' \
+            -e 's|^AT_DEVICE="/dev/smd11"|AT_DEVICE="/dev/at_mdm0"|' \
+            "$f"
+        sms_patched=$((sms_patched + 1))
+    done
+    [ "$sms_patched" -gt 0 ] && info "sms_tool callers retargeted: /dev/smd11 -> /dev/at_mdm0 ($sms_patched files)"
 }
 
 # =============================================================================
