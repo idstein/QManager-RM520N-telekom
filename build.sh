@@ -133,6 +133,15 @@ cp "$DEPS_DIR/atcli_smd11" "$STAGING_DIR/dependencies/atcli_smd11"
 cp "$DEPS_DIR/sms_tool"    "$STAGING_DIR/dependencies/sms_tool"
 chmod 755 "$STAGING_DIR/dependencies/atcli_smd11" "$STAGING_DIR/dependencies/sms_tool"
 
+# Ookla speedtest (static armhf) for the Telekom variant. Optional — upstream
+# install_rm520n.sh downloads it at install time via curl; we ship pre-bundled
+# so the Telekom installer doesn't need TLS at install time for this piece.
+if [ -f "$DEPS_DIR/speedtest-armhf" ]; then
+    cp "$DEPS_DIR/speedtest-armhf" "$STAGING_DIR/dependencies/speedtest-armhf"
+    chmod 755 "$STAGING_DIR/dependencies/speedtest-armhf"
+    step "Bundled speedtest-armhf (Ookla 1.2.0 static)"
+fi
+
 # jq: bundle whichever variants exist. install_rm520n.sh prefers jq.ipk;
 # install_telekom_se.sh prefers jq-static-armv7l.
 if [ "$HAVE_JQ_IPK" -eq 1 ]; then

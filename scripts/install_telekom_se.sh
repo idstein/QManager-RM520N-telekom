@@ -218,6 +218,10 @@ install_backend() {
         install -m 755 "$SRC_DEPS/sms_tool" "$BIN_DIR/sms_tool"
         info "sms_tool -> $BIN_DIR (static armv7l)"
     fi
+    if [ -f "$SRC_DEPS/speedtest-armhf" ]; then
+        install -m 755 "$SRC_DEPS/speedtest-armhf" "$BIN_DIR/speedtest"
+        info "speedtest -> $BIN_DIR (Ookla 1.2.0 armhf, static)"
+    fi
 
     # jq — REQUIRED. The bundled jq.ipk uses Entware's loader and will NOT
     # run on this device. A static armv7l jq must be supplied separately.
