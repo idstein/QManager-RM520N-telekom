@@ -141,12 +141,33 @@ This is a `dev` draft. Known gaps:
 
 ---
 
-## Recovery if `install_telekom_se.sh` half-installs
+## Uninstall
 
-The installer is **NOT** fully idempotent yet. If it fails partway, you can either:
+Symmetric to the installer:
 
 ```sh
-# Remove everything QManager-related:
+bash /tmp/qmanager_install/uninstall_telekom_se.sh           # preserves /etc/qmanager
+bash /tmp/qmanager_install/uninstall_telekom_se.sh --purge   # also removes config
+bash /tmp/qmanager_install/uninstall_telekom_se.sh --force   # skip confirmation
+```
+
+Removes:
+- All `qmanager_httpd.service` + `qmanager-*.service` units from `/etc/systemd/system/`
+- Their wants symlinks
+- `/etc/profile.d/qmanager.sh` (PATH augmentation)
+- `/usrdata/qmanager/` (web root, bin, lib, httpd.conf)
+- `/etc/qmanager/` (only with `--purge`)
+
+**Never touched** by the uninstaller:
+- `/usrdata/tailscale/` (binaries + state)
+- `/etc/systemd/system/tailscaled.service` (active unit)
+- `/etc/systemd/system/multi-user.target.wants/tailscaled.service`
+
+The script ends with a verification step that confirms `tailscaled` is still `active` and prints a warning if not.
+
+### Manual recovery (if the uninstaller can't run for some reason)
+
+```sh
 systemctl stop qmanager_httpd qmanager-* 2>/dev/null
 systemctl disable qmanager_httpd qmanager-* 2>/dev/null
 rm -f /etc/systemd/system/qmanager_httpd.service
@@ -156,8 +177,6 @@ rm -rf /usrdata/qmanager
 rm -f /etc/profile.d/qmanager.sh
 systemctl daemon-reload
 ```
-
-Tailscale is **not** touched by the install or this cleanup.
 
 ---
 

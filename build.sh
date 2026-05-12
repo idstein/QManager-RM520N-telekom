@@ -73,7 +73,7 @@ for item in "$SCRIPTS_DIR"/*; do
   # Installer scripts and the telekom CGI overrides directory are copied
   # individually below so they end up in the right place in the tarball root.
   case "$name" in
-    install_rm520n.sh|uninstall_rm520n.sh|install_telekom_se.sh) continue ;;
+    install_rm520n.sh|uninstall_rm520n.sh|install_telekom_se.sh|uninstall_telekom_se.sh) continue ;;
     telekom-cgi-overrides) continue ;;
   esac
   cp -r "$item" "$STAGING_DIR/scripts/$name"
@@ -86,6 +86,11 @@ if [ -f "$SCRIPTS_DIR/install_telekom_se.sh" ]; then
     cp "$SCRIPTS_DIR/install_telekom_se.sh" "$STAGING_DIR/install_telekom_se.sh"
     chmod +x "$STAGING_DIR/install_telekom_se.sh"
     step "Staged install_telekom_se.sh (Telekom 5G Empfaenger variant)"
+fi
+if [ -f "$SCRIPTS_DIR/uninstall_telekom_se.sh" ]; then
+    cp "$SCRIPTS_DIR/uninstall_telekom_se.sh" "$STAGING_DIR/uninstall_telekom_se.sh"
+    chmod +x "$STAGING_DIR/uninstall_telekom_se.sh"
+    step "Staged uninstall_telekom_se.sh"
 fi
 if [ -d "$SCRIPTS_DIR/telekom-cgi-overrides" ]; then
     cp -r "$SCRIPTS_DIR/telekom-cgi-overrides" "$STAGING_DIR/telekom-cgi-overrides"
